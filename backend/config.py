@@ -49,6 +49,36 @@ VALID_UNITS = ['metric', 'imperial']
 DEFAULT_UNITS = 'metric'
 
 # ============================================================================
+# WEATHER ALERT THRESHOLDS
+# ============================================================================
+
+# Temperature thresholds (in the respective units)
+ALERT_TEMP_HIGH_CELSIUS = 35  # High temperature alert in Celsius
+ALERT_TEMP_HIGH_FAHRENHEIT = 95  # High temperature alert in Fahrenheit
+
+# Humidity threshold (percentage)
+ALERT_HUMIDITY_HIGH = 80  # High humidity alert at 80% or above
+
+# Bad weather conditions (any of these will trigger an alert)
+BAD_WEATHER_CONDITIONS = [
+    'Thunderstorm',
+    'Tornado',
+    'Hurricane',
+    'Extreme',
+    'Severe',
+    'Rainy',
+    'Rain',
+    'Drizzle'
+]
+
+# ============================================================================
+# LOGGING CONFIGURATION
+# ============================================================================
+
+LOG_FORMAT = '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+LOG_LEVEL = 'INFO'
+
+# ============================================================================
 # LOGGING CONFIGURATION
 # ============================================================================
 

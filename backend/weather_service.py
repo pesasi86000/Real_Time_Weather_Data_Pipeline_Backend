@@ -6,6 +6,7 @@ Handles all weather API interactions with modular, reusable functions
 import re
 import requests
 from helpers import setup_logger
+from alerts_service import generate_alerts
 from config import (
     OPENWEATHER_API_KEY,
     OPENWEATHER_BASE_URL,
@@ -267,6 +268,12 @@ def fetch_weather_data(city, units='metric'):
     # Extract and format weather information
     try:
         weather_info = extract_weather_info(data, units)
+        
+        # Generate weather alerts
+        weather_alerts = generate_alerts(weather_info)
+        weather_info['alerts_active'] = weather_alerts['alerts_active']
+        weather_info['alerts'] = weather_alerts['alerts']
+        
         logger.info(f"Successfully fetched weather for {city}")
         return True, weather_info
         
