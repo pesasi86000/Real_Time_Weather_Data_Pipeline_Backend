@@ -3,6 +3,7 @@ Weather Service Module
 Handles all weather API interactions with modular, reusable functions
 """
 
+import re
 import requests
 import logging
 from dotenv import load_dotenv
@@ -25,7 +26,7 @@ REQUEST_TIMEOUT = 5
 
 def validate_city(city):
     """
-    Validate city parameter
+    Validate city parameter format and content
     
     Args:
         city (str): City name to validate
@@ -33,11 +34,33 @@ def validate_city(city):
     Returns:
         tuple: (is_valid: bool, error_message: str or None)
     """
+    # Check type and basic emptiness
     if not city or not isinstance(city, str):
         return False, "City name is required and must be a string"
     
+    # Check for whitespace-only input
     if not city.strip():
-        return False, "City name cannot be empty or whitespace"
+        return False, "City name cannot be empty or contain only whitespace"
+    
+    # Check length constraints
+    city_clean = city.strip()
+    if len(city_clean) < 2:
+        return False, "City name must be at least 2 characters long"
+    
+    if len(city_clean) > 100:
+        return False, "City name cannot exceed 100 characters"
+    
+    # Check for invalid characters (allow letters, numbers, spaces, commas, hyphens, and periods)
+    # This pattern allows: letters, numbers, spaces, hyphens, apostrophes, periods, and commas (for country codes)
+    if not re.match(r"^[a-zA-Z0-9\s\-',.]+$", city_clean):
+        return False, "City name contains invalid characters. Only letters, numbers, spaces, hyphens, apostrophes, periods, and commas are allowed"
+    
+    # Check for leading/trailing invalid characters
+    if city_clean.startswith('-') or city_clean.startswith(',') or city_clean.startswith('.'):
+        return False, "City name cannot start with a hyphen, comma, or period"
+    
+    if city_clean.endswith('-') or city_clean.endswith(',') or city_clean.endswith('.'):
+        return False, "City name cannot end with a hyphen, comma, or period"
     
     return True, None
 
