@@ -85,6 +85,117 @@ def get_weather():
         }), 500
 
 
+@app.route('/weather/batch', methods=['GET', 'POST'])
+def get_weather_batch():
+    """
+    Fetch real-time weather data for multiple cities
+    
+    GET Query parameters:
+        - cities (required): Comma-separated city names (e.g., 'London,Paris,Tokyo')
+        - units (optional): 'metric' (Celsius) or 'imperial' (Fahrenheit), default 'metric'
+    
+    POST JSON body:
+        {
+            "cities": ["London", "Paris", "Tokyo"],
+            "units": "metric"
+        }
+    
+    Example GET: /weather/batch?cities=London,Paris,Tokyo&units=metric
+    Example POST: {"cities": ["London", "Paris", "Tokyo"], "units": "metric"}
+    """
+    try:
+        cities = []
+        units = 'metric'
+        
+        # Handle GET request
+        if request.method == 'GET':
+            cities_param = request.args.get('cities', '').strip()
+            units = request.args.get('units', 'metric').lower()
+            
+            if not cities_param:
+                logger.warning("Batch weather request missing cities parameter")
+                return jsonify({
+                    'error': 'Missing required parameter',
+                    'message': 'cities parameter is required',
+                    'example': '/weather/batch?cities=London,Paris,Tokyo'
+                }), 400
+            
+            cities = [city.strip() for city in cities_param.split(',') if city.strip()]
+        
+        # Handle POST request
+        elif request.method == 'POST':
+            data = request.get_json()
+            
+            if not data or 'cities' not in data:
+                logger.warning("Batch weather request missing cities in body")
+                return jsonify({
+                    'error': 'Missing required field',
+                    'message': 'cities field is required in JSON body',
+                    'example': '{"cities": ["London", "Paris", "Tokyo"], "units": "metric"}'
+                }), 400
+            
+            cities = data.get('cities', [])
+            units = data.get('units', 'metric').lower()
+            
+            if not isinstance(cities, list):
+                return jsonify({
+                    'error': 'Invalid format',
+                    'message': 'cities must be a list'
+                }), 400
+        
+        # Validate cities list
+        if not cities:
+            return jsonify({
+                'error': 'Empty cities list',
+                'message': 'At least one city is required'
+            }), 400
+        
+        if units not in ['metric', 'imperial']:
+            logger.warning(f"Invalid units parameter: {units}")
+            return jsonify({
+                'error': 'Invalid parameter',
+                'message': "units must be 'metric' or 'imperial'",
+                'example': '/weather/batch?cities=London,Paris&units=metric'
+            }), 400
+        
+        # Fetch weather for all cities
+        results = {
+            'successful': [],
+            'failed': [],
+            'total_requested': len(cities)
+        }
+        
+        for city in cities:
+            success, result = fetch_weather_data(city, units)
+            
+            if success:
+                results['successful'].append(result)
+                logger.info(f"✓ Fetched weather for {city}")
+            else:
+                results['failed'].append({
+                    'city': city,
+                    'error': result
+                })
+                logger.warning(f"✗ Failed to fetch weather for {city}: {result}")
+        
+        # Return appropriate response
+        if results['successful']:
+            results['successful_count'] = len(results['successful'])
+            results['failed_count'] = len(results['failed'])
+            logger.info(f"Successfully fetched weather for {len(results['successful'])}/{len(cities)} cities")
+            return jsonify(results), 200
+        else:
+            logger.error("Failed to fetch weather for any city")
+            return jsonify(results), 400
+        
+    except Exception as e:
+        logger.exception(f"Unexpected error in get_weather_batch: {str(e)}")
+        return jsonify({
+            'error': 'Unexpected error',
+            'message': 'An unexpected error occurred. Please try again later.'
+        }), 500
+
+
 @app.route('/health', methods=['GET'])
 def health_check():
     """Health check endpoint"""

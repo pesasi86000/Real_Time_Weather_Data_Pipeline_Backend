@@ -42,9 +42,28 @@ success, message = save_weather_to_csv(weather_data)
 ### **app.py** 🚀
 - **Purpose**: Flask API endpoints
 - **Routes**:
-  - `GET /weather?city=London&units=metric` - Fetch weather
+  - `GET /weather?city=London&units=metric` - Fetch weather for single city
+  - `GET /weather/batch?cities=London,Paris,Tokyo&units=metric` - Fetch weather for multiple cities (comma-separated)
+  - `POST /weather/batch` - Fetch weather for multiple cities (JSON body)
   - `GET /health` - Health check
 - **Now much simpler**: Uses `weather_service` instead of duplicating code
+
+**Single City Example:**
+```bash
+curl "http://localhost:5000/weather?city=Hyderabad"
+```
+
+**Multiple Cities (GET):**
+```bash
+curl "http://localhost:5000/weather/batch?cities=London,Paris,Tokyo&units=metric"
+```
+
+**Multiple Cities (POST):**
+```bash
+curl -X POST http://localhost:5000/weather/batch \
+  -H "Content-Type: application/json" \
+  -d '{"cities": ["London", "Paris", "Tokyo"], "units": "metric"}'
+```
 
 ### **fetch_weather_csv.py** 📥
 - **Purpose**: Batch weather fetching script
@@ -114,11 +133,12 @@ backend/
 
 ## 🚀 Next Steps (Optional Enhancements)
 
-1. **Add unit tests** for weather_service.py
-2. **Add database support** instead of CSV
-3. **Add scheduled tasks** (celery) for automatic weather updates
-4. **Add API documentation** (Swagger/OpenAPI)
-5. **Add caching** to reduce API calls
+1. ✅ **Multiple city support** - Batch endpoints added (`/weather/batch`)
+2. **Add unit tests** for weather_service.py
+3. **Add database support** instead of CSV
+4. **Add scheduled tasks** (celery) for automatic weather updates
+5. **Add API documentation** (Swagger/OpenAPI)
+6. **Add caching** to reduce API calls
 
 ---
 

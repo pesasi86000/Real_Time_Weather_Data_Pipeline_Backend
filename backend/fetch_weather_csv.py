@@ -102,13 +102,6 @@ def main(cities=None):
 
 
 if __name__ == '__main__':
-    # Example: Fetch weather for multiple cities
-    main()
-    else:
-        logger.warning("No weather data was retrieved")
-
-
-if __name__ == '__main__':
     # Example: Fetch weather for specific cities
     main(cities=['London', 'New York', 'Tokyo'])
     
