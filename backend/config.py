@@ -18,11 +18,23 @@ OPENWEATHER_BASE_URL = 'https://api.openweathermap.org/data/2.5/weather'
 REQUEST_TIMEOUT = 5  # seconds
 
 # ============================================================================
-# CSV CONFIGURATION
+# DATA STORAGE CONFIGURATION
 # ============================================================================
 
+# Storage type: 'csv' or 'sqlite'
+# CSV: Simple, human-readable files (good for beginners)
+# SQLite: Database format (better for large datasets and queries)
+STORAGE_TYPE = os.getenv('STORAGE_TYPE', 'csv')  # Options: 'csv', 'sqlite'
+
+# Storage directory for data files
+STORAGE_DIR = os.getenv('STORAGE_DIR', 'weather_data')
+
+# CSV Configuration
 CSV_FILE = 'weather_data.csv'
 CSV_COLUMNS = ['datetime', 'city', 'temperature', 'humidity', 'condition', 'units']
+
+# SQLite Configuration
+SQLITE_DB = 'weather_data.db'
 
 # ============================================================================
 # FLASK CONFIGURATION
@@ -70,13 +82,6 @@ BAD_WEATHER_CONDITIONS = [
     'Rain',
     'Drizzle'
 ]
-
-# ============================================================================
-# LOGGING CONFIGURATION
-# ============================================================================
-
-LOG_FORMAT = '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-LOG_LEVEL = 'INFO'
 
 # ============================================================================
 # LOGGING CONFIGURATION
