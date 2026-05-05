@@ -1,22 +1,13 @@
 from flask import Flask, jsonify, request
-from dotenv import load_dotenv
-import logging
-import os
-
-# Import service modules
+from helpers import setup_logger, error_response, success_response
 from weather_service import fetch_weather_data, validate_city
+from config import OPENWEATHER_API_KEY, FLASK_HOST, FLASK_PORT, FLASK_DEBUG, MAX_BATCH_CITIES, VALID_UNITS, DEFAULT_UNITS
 
-# Load environment variables
-load_dotenv()
-
-# Get API key status for health check
-OPENWEATHER_API_KEY = os.getenv('OPENWEATHER_API_KEY')
-
+# Initialize Flask app
 app = Flask(__name__)
 
-# Configure logging
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
+# Setup logging
+logger = setup_logger(__name__)
 
 
 @app.route('/weather', methods=['GET'])
@@ -46,76 +37,47 @@ def get_weather():
         # Validate city parameter
         if not city:
             logger.warning("Weather request missing city parameter")
-            return jsonify({
-                'success': False,
-                'error': 'Missing required parameter',
-                'message': 'The "city" parameter is required',
-                'example': '/weather?city=London&units=metric'
-            }), 400
+            return error_response(False, 'Missing required parameter', 
+                                'The "city" parameter is required', 400)
         
         # Validate city format
         is_valid, validation_error = validate_city(city)
         if not is_valid:
             logger.warning(f"Invalid city format: {city} - {validation_error}")
-            return jsonify({
-                'success': False,
-                'error': 'Invalid city format',
-                'message': validation_error,
-                'example': '/weather?city=London&units=metric'
-            }), 400
+            return error_response(False, 'Invalid city format', validation_error, 400)
         
         # Validate units parameter
-        if units not in ['metric', 'imperial']:
+        if units not in VALID_UNITS:
             logger.warning(f"Invalid units parameter: {units}")
-            return jsonify({
-                'success': False,
-                'error': 'Invalid parameter',
-                'message': "The 'units' parameter must be 'metric' or 'imperial'",
-                'example': '/weather?city=London&units=metric'
-            }), 400
+            return error_response(False, 'Invalid parameter',
+                                f"The 'units' parameter must be one of: {', '.join(VALID_UNITS)}", 400)
         
         # Fetch weather using the service
         success, result = fetch_weather_data(city, units)
         
         if not success:
-            # Result is an error message from the service
             logger.warning(f"Failed to fetch weather for {city}: {result}")
             
             # Determine appropriate HTTP status code based on error message
             if 'not found' in result.lower():
-                status_code = 404
-                error_type = 'City not found'
+                return error_response(False, 'City not found', result, 404)
             elif 'invalid' in result.lower() and 'api' in result.lower():
-                status_code = 401
-                error_type = 'Authentication error'
+                return error_response(False, 'Authentication error', result, 401)
             elif 'rate limit' in result.lower() or 'too many' in result.lower():
-                status_code = 429
-                error_type = 'Rate limit exceeded'
+                return error_response(False, 'Rate limit exceeded', result, 429)
             elif 'timeout' in result.lower():
-                status_code = 503
-                error_type = 'Service unavailable'
+                return error_response(False, 'Service unavailable', result, 503)
             else:
-                status_code = 500
-                error_type = 'Internal server error'
-            
-            return jsonify({
-                'success': False,
-                'error': error_type,
-                'message': result
-            }), status_code
+                return error_response(False, 'Internal server error', result, 500)
         
         # Success - return weather data with success flag
         logger.info(f"Successfully fetched weather for {city}")
-        result['success'] = True
-        return jsonify(result), 200
+        return success_response(result, 200)
         
     except Exception as e:
         logger.exception(f"Unexpected error in get_weather: {str(e)}")
-        return jsonify({
-            'success': False,
-            'error': 'Internal server error',
-            'message': 'An unexpected error occurred. Please try again later.'
-        }), 500
+        return error_response(False, 'Internal server error',
+                            'An unexpected error occurred. Please try again later.', 500)
 
 
 @app.route('/weather/batch', methods=['GET', 'POST'])
@@ -151,12 +113,8 @@ def get_weather_batch():
             
             if not cities_param:
                 logger.warning("Batch weather request missing cities parameter")
-                return jsonify({
-                    'success': False,
-                    'error': 'Missing required parameter',
-                    'message': 'The "cities" parameter is required (comma-separated)',
-                    'example': '/weather/batch?cities=London,Paris,Tokyo'
-                }), 400
+                return error_response(False, 'Missing required parameter',
+                                    'The "cities" parameter is required (comma-separated)', 400)
             
             cities = [city.strip() for city in cities_param.split(',') if city.strip()]
         
@@ -166,48 +124,31 @@ def get_weather_batch():
             
             if not data or 'cities' not in data:
                 logger.warning("Batch weather request missing cities in body")
-                return jsonify({
-                    'success': False,
-                    'error': 'Missing required field',
-                    'message': 'The "cities" field is required in JSON body',
-                    'example': '{"cities": ["London", "Paris", "Tokyo"], "units": "metric"}'
-                }), 400
+                return error_response(False, 'Missing required field',
+                                    'The "cities" field is required in JSON body', 400)
             
             cities = data.get('cities', [])
             units = data.get('units', 'metric').lower()
             
             if not isinstance(cities, list):
-                return jsonify({
-                    'success': False,
-                    'error': 'Invalid format',
-                    'message': 'The "cities" field must be a list of city names'
-                }), 400
+                return error_response(False, 'Invalid format',
+                                    'The "cities" field must be a list of city names', 400)
         
         # Validate cities list
         if not cities:
-            return jsonify({
-                'success': False,
-                'error': 'Empty cities list',
-                'message': 'At least one city is required'
-            }), 400
+            return error_response(False, 'Empty cities list',
+                                'At least one city is required', 400)
         
         # Limit batch size for performance
-        if len(cities) > 50:
-            return jsonify({
-                'success': False,
-                'error': 'Too many cities',
-                'message': 'Maximum 50 cities per request'
-            }), 400
+        if len(cities) > MAX_BATCH_CITIES:
+            return error_response(False, 'Too many cities',
+                                f'Maximum {MAX_BATCH_CITIES} cities per request', 400)
         
         # Validate units parameter
-        if units not in ['metric', 'imperial']:
+        if units not in VALID_UNITS:
             logger.warning(f"Invalid units parameter: {units}")
-            return jsonify({
-                'success': False,
-                'error': 'Invalid parameter',
-                'message': "The 'units' parameter must be 'metric' or 'imperial'",
-                'example': '/weather/batch?cities=London,Paris&units=metric'
-            }), 400
+            return error_response(False, 'Invalid parameter',
+                                f"The 'units' parameter must be one of: {', '.join(VALID_UNITS)}", 400)
         
         # Validate and fetch weather for all cities
         results = {
@@ -257,11 +198,8 @@ def get_weather_batch():
         
     except Exception as e:
         logger.exception(f"Unexpected error in get_weather_batch: {str(e)}")
-        return jsonify({
-            'success': False,
-            'error': 'Internal server error',
-            'message': 'An unexpected error occurred. Please try again later.'
-        }), 500
+        return error_response(False, 'Internal server error',
+                            'An unexpected error occurred. Please try again later.', 500)
 
 
 @app.route('/health', methods=['GET'])
@@ -280,38 +218,23 @@ def health_check():
 @app.errorhandler(404)
 def not_found(error):
     """Handle 404 errors"""
-    return jsonify({
-        'success': False,
-        'error': 'Not found',
-        'message': 'The requested endpoint does not exist',
-        'available_endpoints': ['/weather', '/weather/batch', '/health']
-    }), 404
+    return error_response(False, 'Not found',
+                        'The requested endpoint does not exist', 404)
 
 
 @app.errorhandler(405)
 def method_not_allowed(error):
     """Handle 405 errors (method not allowed)"""
-    return jsonify({
-        'success': False,
-        'error': 'Method not allowed',
-        'message': 'The HTTP method used is not allowed for this endpoint'
-    }), 405
+    return error_response(False, 'Method not allowed',
+                        'The HTTP method used is not allowed for this endpoint', 405)
 
 
 @app.errorhandler(500)
 def internal_error(error):
     """Handle 500 errors"""
-    return jsonify({
-        'success': False,
-        'error': 'Internal server error',
-        'message': 'An unexpected error occurred. Please try again later.'
-    }), 500
-    """Handle 500 errors"""
     logger.exception("Internal server error")
-    return jsonify({
-        'error': 'Internal server error',
-        'message': 'An unexpected error occurred on the server'
-    }), 500
+    return error_response(False, 'Internal server error',
+                        'An unexpected error occurred. Please try again later.', 500)
 
 
 if __name__ == '__main__':
@@ -323,5 +246,5 @@ if __name__ == '__main__':
     else:
         logger.info("✓ OPENWEATHER_API_KEY is configured")
     
-    # Run Flask app in debug mode (change to False in production)
-    app.run(debug=True, host='0.0.0.0', port=5000)
+    # Run Flask app
+    app.run(debug=FLASK_DEBUG, host=FLASK_HOST, port=FLASK_PORT)

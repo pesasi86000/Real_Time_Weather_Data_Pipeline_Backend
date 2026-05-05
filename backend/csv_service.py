@@ -5,14 +5,11 @@ Handles all CSV file operations with clean, modular functions
 
 import csv
 import os
-import logging
 from datetime import datetime
+from helpers import setup_logger
+from config import CSV_FILE, CSV_COLUMNS
 
-logger = logging.getLogger(__name__)
-
-# Configuration
-CSV_FILE = 'weather_data.csv'
-CSV_COLUMNS = ['datetime', 'city', 'temperature', 'humidity', 'condition', 'units']
+logger = setup_logger(__name__)
 
 
 # ============================================================================

@@ -3,16 +3,12 @@ Fetch Weather Data and Save to CSV
 Standalone script to fetch weather for multiple cities and save to CSV
 """
 
-import logging
 from weather_service import fetch_weather_data
 from csv_service import save_weather_to_csv
+from helpers import setup_logger
 
-# Configure logging
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(levelname)s - %(message)s'
-)
-logger = logging.getLogger(__name__)
+# Setup logging
+logger = setup_logger(__name__)
 
 
 def fetch_and_save_weather(cities, units='metric'):

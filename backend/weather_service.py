@@ -5,19 +5,17 @@ Handles all weather API interactions with modular, reusable functions
 
 import re
 import requests
-import logging
-from dotenv import load_dotenv
-import os
+from helpers import setup_logger
+from config import (
+    OPENWEATHER_API_KEY,
+    OPENWEATHER_BASE_URL,
+    REQUEST_TIMEOUT,
+    MIN_CITY_LENGTH,
+    MAX_CITY_LENGTH,
+    VALID_UNITS
+)
 
-# Load environment variables
-load_dotenv()
-
-logger = logging.getLogger(__name__)
-
-# Configuration
-OPENWEATHER_API_KEY = os.getenv('OPENWEATHER_API_KEY')
-OPENWEATHER_BASE_URL = 'https://api.openweathermap.org/data/2.5/weather'
-REQUEST_TIMEOUT = 5
+logger = setup_logger(__name__)
 
 
 # ============================================================================
@@ -44,11 +42,11 @@ def validate_city(city):
     
     # Check length constraints
     city_clean = city.strip()
-    if len(city_clean) < 2:
-        return False, "City name must be at least 2 characters long"
+    if len(city_clean) < MIN_CITY_LENGTH:
+        return False, f"City name must be at least {MIN_CITY_LENGTH} characters long"
     
-    if len(city_clean) > 100:
-        return False, "City name cannot exceed 100 characters"
+    if len(city_clean) > MAX_CITY_LENGTH:
+        return False, f"City name cannot exceed {MAX_CITY_LENGTH} characters"
     
     # Check for invalid characters (allow letters, numbers, spaces, commas, hyphens, and periods)
     # This pattern allows: letters, numbers, spaces, hyphens, apostrophes, periods, and commas (for country codes)
@@ -75,10 +73,8 @@ def validate_units(units):
     Returns:
         tuple: (is_valid: bool, error_message: str or None)
     """
-    valid_units = ['metric', 'imperial']
-    
-    if units not in valid_units:
-        return False, f"Units must be one of: {', '.join(valid_units)}"
+    if units not in VALID_UNITS:
+        return False, f"Units must be one of: {', '.join(VALID_UNITS)}"
     
     return True, None
 
