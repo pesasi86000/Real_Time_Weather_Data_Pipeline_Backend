@@ -87,35 +87,34 @@ def initialize_sqlite():
     try:
         db_path = os.path.join(STORAGE_DIR, SQLITE_DB)
         
-        conn = sqlite3.connect(db_path)
-        cursor = conn.cursor()
-        
-        # Create table if it doesn't exist
-        cursor.execute('''
-            CREATE TABLE IF NOT EXISTS weather_data (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                datetime TEXT NOT NULL,
-                city TEXT NOT NULL,
-                temperature REAL NOT NULL,
-                humidity INTEGER NOT NULL,
-                condition TEXT NOT NULL,
-                units TEXT DEFAULT 'metric',
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            )
-        ''')
-        
-        # Create index on datetime and city for faster queries
-        cursor.execute('''
-            CREATE INDEX IF NOT EXISTS idx_datetime 
-            ON weather_data(datetime)
-        ''')
-        cursor.execute('''
-            CREATE INDEX IF NOT EXISTS idx_city 
-            ON weather_data(city)
-        ''')
-        
-        conn.commit()
-        conn.close()
+        with sqlite3.connect(db_path) as conn:
+            cursor = conn.cursor()
+
+            # Create table if it doesn't exist
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS weather_data (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    datetime TEXT NOT NULL,
+                    city TEXT NOT NULL,
+                    temperature REAL NOT NULL,
+                    humidity INTEGER NOT NULL,
+                    condition TEXT NOT NULL,
+                    units TEXT DEFAULT 'metric',
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            ''')
+
+            # Create index on datetime and city for faster queries
+            cursor.execute('''
+                CREATE INDEX IF NOT EXISTS idx_datetime
+                ON weather_data(datetime)
+            ''')
+            cursor.execute('''
+                CREATE INDEX IF NOT EXISTS idx_city
+                ON weather_data(city)
+            ''')
+
+            conn.commit()
         
         logger.info(f"SQLite database initialized: {db_path}")
         return True, f"SQLite database created at {db_path}"
@@ -308,25 +307,22 @@ def save_to_sqlite(weather_data: Dict) -> Tuple[bool, str]:
         record = format_weather_record(weather_data)
         
         db_path = os.path.join(STORAGE_DIR, SQLITE_DB)
-        conn = sqlite3.connect(db_path)
-        cursor = conn.cursor()
-        
-        cursor.execute('''
-            INSERT INTO weather_data 
-            (datetime, city, temperature, humidity, condition, units)
-            VALUES (?, ?, ?, ?, ?, ?)
-        ''', (
-            record['datetime'],
-            record['city'],
-            record['temperature'],
-            record['humidity'],
-            record['condition'],
-            record['units']
-        ))
-        
-        conn.commit()
-        conn.close()
-        
+        with sqlite3.connect(db_path) as conn:
+            cursor = conn.cursor()
+            cursor.execute('''
+                INSERT INTO weather_data
+                (datetime, city, temperature, humidity, condition, units)
+                VALUES (?, ?, ?, ?, ?, ?)
+            ''', (
+                record['datetime'],
+                record['city'],
+                record['temperature'],
+                record['humidity'],
+                record['condition'],
+                record['units']
+            ))
+            conn.commit()
+
         logger.info(f"Saved weather data for {record['city']} to SQLite")
         return True, f"Weather data saved to SQLite for {record['city']}"
         
@@ -363,26 +359,23 @@ def save_batch_to_sqlite(weather_records: List[Dict]) -> Tuple[bool, str]:
             return False, "No valid records to save"
         
         db_path = os.path.join(STORAGE_DIR, SQLITE_DB)
-        conn = sqlite3.connect(db_path)
-        cursor = conn.cursor()
-        
-        for record in formatted_records:
-            cursor.execute('''
-                INSERT INTO weather_data 
-                (datetime, city, temperature, humidity, condition, units)
-                VALUES (?, ?, ?, ?, ?, ?)
-            ''', (
-                record['datetime'],
-                record['city'],
-                record['temperature'],
-                record['humidity'],
-                record['condition'],
-                record['units']
-            ))
-        
-        conn.commit()
-        conn.close()
-        
+        with sqlite3.connect(db_path) as conn:
+            cursor = conn.cursor()
+            for record in formatted_records:
+                cursor.execute('''
+                    INSERT INTO weather_data
+                    (datetime, city, temperature, humidity, condition, units)
+                    VALUES (?, ?, ?, ?, ?, ?)
+                ''', (
+                    record['datetime'],
+                    record['city'],
+                    record['temperature'],
+                    record['humidity'],
+                    record['condition'],
+                    record['units']
+                ))
+            conn.commit()
+
         logger.info(f"Saved {len(formatted_records)} records to SQLite")
         return True, f"Saved {len(formatted_records)} records to SQLite"
         
@@ -491,29 +484,28 @@ def get_weather_data_sqlite(city: Optional[str] = None, limit: int = 100) -> Lis
             logger.warning(f"SQLite database not found: {db_path}")
             return []
         
-        conn = sqlite3.connect(db_path)
-        conn.row_factory = sqlite3.Row  # Return rows as dictionaries
-        cursor = conn.cursor()
-        
-        if city:
-            cursor.execute('''
-                SELECT datetime, city, temperature, humidity, condition, units
-                FROM weather_data
-                WHERE city = ?
-                ORDER BY datetime DESC
-                LIMIT ?
-            ''', (city, limit))
-        else:
-            cursor.execute('''
-                SELECT datetime, city, temperature, humidity, condition, units
-                FROM weather_data
-                ORDER BY datetime DESC
-                LIMIT ?
-            ''', (limit,))
-        
-        records = [dict(row) for row in cursor.fetchall()]
-        conn.close()
-        
+        with sqlite3.connect(db_path) as conn:
+            conn.row_factory = sqlite3.Row  # Return rows as dictionaries
+            cursor = conn.cursor()
+
+            if city:
+                cursor.execute('''
+                    SELECT datetime, city, temperature, humidity, condition, units
+                    FROM weather_data
+                    WHERE city = ?
+                    ORDER BY datetime DESC
+                    LIMIT ?
+                ''', (city, limit))
+            else:
+                cursor.execute('''
+                    SELECT datetime, city, temperature, humidity, condition, units
+                    FROM weather_data
+                    ORDER BY datetime DESC
+                    LIMIT ?
+                ''', (limit,))
+
+            records = [dict(row) for row in cursor.fetchall()]
+
         logger.info(f"Retrieved {len(records)} records from SQLite")
         return records
         
@@ -570,11 +562,10 @@ def get_storage_stats() -> Dict:
             db_path = os.path.join(STORAGE_DIR, SQLITE_DB)
             if os.path.exists(db_path):
                 stats['file_size_mb'] = round(os.path.getsize(db_path) / (1024 * 1024), 2)
-                conn = sqlite3.connect(db_path)
-                cursor = conn.cursor()
-                cursor.execute('SELECT COUNT(*) FROM weather_data')
-                stats['record_count'] = cursor.fetchone()[0]
-                conn.close()
+                with sqlite3.connect(db_path) as conn:
+                    cursor = conn.cursor()
+                    cursor.execute('SELECT COUNT(*) FROM weather_data')
+                    stats['record_count'] = cursor.fetchone()[0]
         
         logger.info(f"Storage stats: {stats}")
         return stats

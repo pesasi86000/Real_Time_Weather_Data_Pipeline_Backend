@@ -1,9 +1,9 @@
 from flask import Flask, jsonify, request, render_template, send_file
-from helpers import setup_logger, error_response, success_response
+from helpers import setup_logger, error_response, success_response, map_error_to_status
 from weather_service import fetch_weather_data, validate_city
 from response_formatter import format_weather_for_dashboard, format_weather_for_api, create_error_response
 from config import OPENWEATHER_API_KEY, FLASK_HOST, FLASK_PORT, FLASK_DEBUG, MAX_BATCH_CITIES, VALID_UNITS, DEFAULT_UNITS
-from data_storage import get_weather_data, get_storage_stats
+from data_storage import get_weather_data, get_storage_stats, initialize_storage
 
 # Initialize Flask app
 app = Flask(__name__, template_folder='templates')
@@ -59,18 +59,8 @@ def get_weather():
         
         if not success:
             logger.warning(f"Failed to fetch weather for {city}: {result}")
-            
-            # Determine appropriate HTTP status code based on error message
-            if 'not found' in result.lower():
-                return error_response(False, 'City not found', result, 404)
-            elif 'invalid' in result.lower() and 'api' in result.lower():
-                return error_response(False, 'Authentication error', result, 401)
-            elif 'rate limit' in result.lower() or 'too many' in result.lower():
-                return error_response(False, 'Rate limit exceeded', result, 429)
-            elif 'timeout' in result.lower():
-                return error_response(False, 'Service unavailable', result, 503)
-            else:
-                return error_response(False, 'Internal server error', result, 500)
+            error_title, status_code = map_error_to_status(result)
+            return error_response(False, error_title, result, status_code)
         
         # Success - return weather data with success flag
         logger.info(f"Successfully fetched weather for {city}")
@@ -135,18 +125,8 @@ def get_dashboard_data():
         
         if not success:
             logger.warning(f"Failed to fetch weather for {city}: {result}")
-            
-            # Determine appropriate HTTP status code based on error message
-            if 'not found' in result.lower():
-                return error_response(False, 'City not found', result, 404)
-            elif 'invalid' in result.lower() and 'api' in result.lower():
-                return error_response(False, 'Authentication error', result, 401)
-            elif 'rate limit' in result.lower() or 'too many' in result.lower():
-                return error_response(False, 'Rate limit exceeded', result, 429)
-            elif 'timeout' in result.lower():
-                return error_response(False, 'Service unavailable', result, 503)
-            else:
-                return error_response(False, 'Internal server error', result, 500)
+            error_title, status_code = map_error_to_status(result)
+            return error_response(False, error_title, result, status_code)
         
         # Format data specifically for dashboard
         logger.info(f"Successfully fetched dashboard data for {city}")
@@ -343,12 +323,17 @@ def get_weather_history():
 @app.route('/health', methods=['GET'])
 def health_check():
     """Health check endpoint"""
-    # Check if API key is configured
     api_key_status = 'configured' if OPENWEATHER_API_KEY and OPENWEATHER_API_KEY != 'your_api_key_here' else 'not configured'
-    
+    storage_stats = get_storage_stats()
+
     return jsonify({
         'status': 'Backend is running',
         'api_key_status': api_key_status,
+        'storage': {
+            'type': storage_stats.get('storage_type'),
+            'record_count': storage_stats.get('record_count'),
+            'file_size_mb': storage_stats.get('file_size_mb')
+        },
         'version': '1.0'
     }), 200
 
@@ -393,6 +378,13 @@ def internal_error(error):
 
 
 if __name__ == '__main__':
+    # Initialize data storage on startup
+    storage_ok, storage_msg = initialize_storage()
+    if storage_ok:
+        logger.info(f"✓ Storage initialized: {storage_msg}")
+    else:
+        logger.warning(f"⚠️  Storage initialization failed: {storage_msg}")
+
     # Check API key on startup
     if not OPENWEATHER_API_KEY:
         logger.warning("⚠️  OPENWEATHER_API_KEY not set in environment. API requests will fail.")

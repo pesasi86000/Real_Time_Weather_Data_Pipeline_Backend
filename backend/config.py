@@ -41,7 +41,7 @@ SQLITE_DB = 'weather_data.db'
 # ============================================================================
 
 FLASK_ENV = os.getenv('FLASK_ENV', 'development')
-FLASK_DEBUG = os.getenv('FLASK_DEBUG', True)
+FLASK_DEBUG = os.getenv('FLASK_DEBUG', 'true').lower() == 'true'
 FLASK_HOST = '0.0.0.0'
 FLASK_PORT = 5000
 
