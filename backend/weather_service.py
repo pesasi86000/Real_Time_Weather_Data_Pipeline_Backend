@@ -5,6 +5,7 @@ Handles all weather API interactions with modular, reusable functions
 
 import re
 import requests
+from datetime import datetime
 from helpers import setup_logger
 from alerts_service import generate_alerts
 from config import (
@@ -203,7 +204,8 @@ def extract_weather_info(api_data, units):
         'description': api_data['weather'][0].get('description', 'N/A'),
         'wind_speed': api_data['wind'].get('speed', 0),
         'cloudiness': api_data.get('clouds', {}).get('all'),
-        'units': units
+        'units': units,
+        'fetched_at': datetime.utcnow().isoformat() + 'Z'
     }
     
     return weather_info

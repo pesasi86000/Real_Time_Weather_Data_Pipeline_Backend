@@ -1,10 +1,11 @@
-from flask import Flask, jsonify, request
+from flask import Flask, jsonify, request, render_template, send_file
 from helpers import setup_logger, error_response, success_response
 from weather_service import fetch_weather_data, validate_city
+from response_formatter import format_weather_for_dashboard, format_weather_for_api, create_error_response
 from config import OPENWEATHER_API_KEY, FLASK_HOST, FLASK_PORT, FLASK_DEBUG, MAX_BATCH_CITIES, VALID_UNITS, DEFAULT_UNITS
 
 # Initialize Flask app
-app = Flask(__name__)
+app = Flask(__name__, template_folder='templates')
 
 # Setup logging
 logger = setup_logger(__name__)
@@ -72,10 +73,87 @@ def get_weather():
         
         # Success - return weather data with success flag
         logger.info(f"Successfully fetched weather for {city}")
-        return success_response(result, 200)
+        formatted_data = format_weather_for_api(result)
+        return success_response(formatted_data, 200)
         
     except Exception as e:
         logger.exception(f"Unexpected error in get_weather: {str(e)}")
+        return error_response(False, 'Internal server error',
+                            'An unexpected error occurred. Please try again later.', 500)
+
+
+@app.route('/dashboard', methods=['GET'])
+def get_dashboard_data():
+    """
+    Fetch weather data optimized for dashboard UI
+    
+    Query parameters:
+        - city (required): City name (e.g., 'London' or 'London,GB')
+        - units (optional): 'metric' (Celsius) or 'imperial' (Fahrenheit), default 'metric'
+    
+    Returns:
+        200: Dashboard-formatted weather data with all fields needed for UI
+        400: Invalid parameters
+        404: City not found
+        500: Server error
+        
+    Response includes:
+        - location: City and country information
+        - current_weather: All weather metrics with proper organization
+        - alerts: Active alerts with severity levels
+        - units: Symbol reference for the UI
+        - timestamp: Data fetch timestamp
+    
+    Example: /dashboard?city=London&units=metric
+    """
+    try:
+        # Get and validate input parameters
+        city = request.args.get('city', '').strip()
+        units = request.args.get('units', 'metric').lower()
+        
+        # Validate city parameter
+        if not city:
+            logger.warning("Dashboard request missing city parameter")
+            return error_response(False, 'Missing required parameter',
+                                'The "city" parameter is required', 400)
+        
+        # Validate city format
+        is_valid, validation_error = validate_city(city)
+        if not is_valid:
+            logger.warning(f"Invalid city format: {city} - {validation_error}")
+            return error_response(False, 'Invalid city format', validation_error, 400)
+        
+        # Validate units parameter
+        if units not in VALID_UNITS:
+            logger.warning(f"Invalid units parameter: {units}")
+            return error_response(False, 'Invalid parameter',
+                                f"The 'units' parameter must be one of: {', '.join(VALID_UNITS)}", 400)
+        
+        # Fetch weather using the service
+        success, result = fetch_weather_data(city, units)
+        
+        if not success:
+            logger.warning(f"Failed to fetch weather for {city}: {result}")
+            
+            # Determine appropriate HTTP status code based on error message
+            if 'not found' in result.lower():
+                return error_response(False, 'City not found', result, 404)
+            elif 'invalid' in result.lower() and 'api' in result.lower():
+                return error_response(False, 'Authentication error', result, 401)
+            elif 'rate limit' in result.lower() or 'too many' in result.lower():
+                return error_response(False, 'Rate limit exceeded', result, 429)
+            elif 'timeout' in result.lower():
+                return error_response(False, 'Service unavailable', result, 503)
+            else:
+                return error_response(False, 'Internal server error', result, 500)
+        
+        # Format data specifically for dashboard
+        logger.info(f"Successfully fetched dashboard data for {city}")
+        dashboard_data = format_weather_for_dashboard(result)
+        return success_response(dashboard_data, 200)
+        
+    except Exception as e:
+        logger.exception(f"Unexpected error in get_dashboard_data: {str(e)}")
         return error_response(False, 'Internal server error',
                             'An unexpected error occurred. Please try again later.', 500)
 
@@ -213,6 +291,23 @@ def health_check():
         'api_key_status': api_key_status,
         'version': '1.0'
     }), 200
+
+
+@app.route('/', methods=['GET'])
+@app.route('/dashboard-ui', methods=['GET'])
+def dashboard_ui():
+    """
+    Serve the weather dashboard UI
+    
+    Returns:
+        HTML: Interactive weather dashboard page
+    """
+    try:
+        return render_template('dashboard.html')
+    except Exception as e:
+        logger.exception(f"Error loading dashboard: {str(e)}")
+        return error_response(False, 'Dashboard error',
+                            'Failed to load dashboard interface', 500)
 
 
 @app.errorhandler(404)
