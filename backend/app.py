@@ -3,6 +3,7 @@ from helpers import setup_logger, error_response, success_response
 from weather_service import fetch_weather_data, validate_city
 from response_formatter import format_weather_for_dashboard, format_weather_for_api, create_error_response
 from config import OPENWEATHER_API_KEY, FLASK_HOST, FLASK_PORT, FLASK_DEBUG, MAX_BATCH_CITIES, VALID_UNITS, DEFAULT_UNITS
+from data_storage import get_weather_data, get_storage_stats
 
 # Initialize Flask app
 app = Flask(__name__, template_folder='templates')
@@ -278,6 +279,65 @@ def get_weather_batch():
         logger.exception(f"Unexpected error in get_weather_batch: {str(e)}")
         return error_response(False, 'Internal server error',
                             'An unexpected error occurred. Please try again later.', 500)
+
+
+@app.route('/weather/history', methods=['GET'])
+def get_weather_history():
+    """
+    Retrieve historical weather data for frontend consumption.
+
+    Query parameters:
+        - city (optional): Filter by city name (e.g., 'London'). Returns all cities if omitted.
+        - limit (optional): Maximum number of records to return (1-500, default 100).
+
+    Returns:
+        200: Historical weather records sorted newest-first
+        400: Invalid query parameters
+        500: Storage error
+
+    Example: /weather/history?city=London&limit=50
+    """
+    try:
+        city = request.args.get('city', '').strip() or None
+        limit_param = request.args.get('limit', '100').strip()
+
+        # Validate limit
+        try:
+            limit = int(limit_param)
+            if limit < 1 or limit > 500:
+                raise ValueError
+        except ValueError:
+            return error_response(False, 'Invalid parameter',
+                                  'The "limit" parameter must be an integer between 1 and 500', 400)
+
+        # Validate city format if provided
+        if city:
+            is_valid, validation_error = validate_city(city)
+            if not is_valid:
+                logger.warning(f"Invalid city format in history request: {city} - {validation_error}")
+                return error_response(False, 'Invalid city format', validation_error, 400)
+
+        records = get_weather_data(city=city, limit=limit)
+        stats = get_storage_stats()
+
+        logger.info(f"Returned {len(records)} historical records (city={city}, limit={limit})")
+        return success_response({
+            'records': records,
+            'count': len(records),
+            'filters': {
+                'city': city,
+                'limit': limit
+            },
+            'storage': {
+                'type': stats.get('storage_type'),
+                'total_records': stats.get('record_count')
+            }
+        }, 200)
+
+    except Exception as e:
+        logger.exception(f"Unexpected error in get_weather_history: {str(e)}")
+        return error_response(False, 'Internal server error',
+                              'An unexpected error occurred. Please try again later.', 500)
 
 
 @app.route('/health', methods=['GET'])
