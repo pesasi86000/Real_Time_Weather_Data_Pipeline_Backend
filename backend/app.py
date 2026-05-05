@@ -1,15 +1,35 @@
 from flask import Flask, jsonify, request, render_template, send_file
+import time
 from helpers import setup_logger, error_response, success_response, map_error_to_status
 from weather_service import fetch_weather_data, validate_city
 from response_formatter import format_weather_for_dashboard, format_weather_for_api, create_error_response
 from config import OPENWEATHER_API_KEY, FLASK_HOST, FLASK_PORT, FLASK_DEBUG, MAX_BATCH_CITIES, VALID_UNITS, DEFAULT_UNITS
 from data_storage import get_weather_data, get_storage_stats, initialize_storage
+from data_cache import weather_cache, batch_cache
+from performance_monitor import performance_monitor
+from alert_manager import alert_manager
 
 # Initialize Flask app
 app = Flask(__name__, template_folder='templates')
 
 # Setup logging
 logger = setup_logger(__name__)
+
+# Request timing middleware
+@app.before_request
+def before_request():
+    """Record request start time"""
+    request.start_time = time.time()
+
+@app.after_request
+def after_request(response):
+    """Record performance metrics after request"""
+    if hasattr(request, 'start_time'):
+        duration = time.time() - request.start_time
+        endpoint = request.endpoint or 'unknown'
+        success = 200 <= response.status_code < 300
+        performance_monitor.record_request(endpoint, duration, success)
+    return response
 
 
 @app.route('/weather', methods=['GET'])
@@ -54,6 +74,13 @@ def get_weather():
             return error_response(False, 'Invalid parameter',
                                 f"The 'units' parameter must be one of: {', '.join(VALID_UNITS)}", 400)
         
+        # Check cache first
+        cache_key = f"weather:{city.lower()}:{units}"
+        cached = weather_cache.get(cache_key)
+        if cached:
+            logger.info(f"Cache hit for {city} ({units})")
+            return success_response(cached, 200)
+
         # Fetch weather using the service
         success, result = fetch_weather_data(city, units)
         
@@ -62,9 +89,13 @@ def get_weather():
             error_title, status_code = map_error_to_status(result)
             return error_response(False, error_title, result, status_code)
         
-        # Success - return weather data with success flag
+        # Process alerts
+        alert_manager.process_weather(city, result)
+
+        # Success - format, cache and return weather data
         logger.info(f"Successfully fetched weather for {city}")
         formatted_data = format_weather_for_api(result)
+        weather_cache.set(cache_key, formatted_data)
         return success_response(formatted_data, 200)
         
     except Exception as e:
@@ -120,6 +151,13 @@ def get_dashboard_data():
             return error_response(False, 'Invalid parameter',
                                 f"The 'units' parameter must be one of: {', '.join(VALID_UNITS)}", 400)
         
+        # Check cache first
+        cache_key = f"dashboard:{city.lower()}:{units}"
+        cached = weather_cache.get(cache_key)
+        if cached:
+            logger.info(f"Cache hit for dashboard {city} ({units})")
+            return success_response(cached, 200)
+
         # Fetch weather using the service
         success, result = fetch_weather_data(city, units)
         
@@ -128,9 +166,13 @@ def get_dashboard_data():
             error_title, status_code = map_error_to_status(result)
             return error_response(False, error_title, result, status_code)
         
-        # Format data specifically for dashboard
+        # Process and track alerts
+        alert_manager.process_weather(city, result)
+
+        # Format data specifically for dashboard, cache and return
         logger.info(f"Successfully fetched dashboard data for {city}")
         dashboard_data = format_weather_for_dashboard(result)
+        weather_cache.set(cache_key, dashboard_data)
         return success_response(dashboard_data, 200)
         
     except Exception as e:
@@ -360,6 +402,146 @@ def not_found(error):
     """Handle 404 errors"""
     return error_response(False, 'Not found',
                         'The requested endpoint does not exist', 404)
+
+
+@app.errorhandler(405)
+def method_not_allowed(error):
+    """Handle 405 errors"""
+    return error_response(False, 'Method not allowed',
+                        'The HTTP method is not allowed for this endpoint', 405)
+
+
+@app.errorhandler(500)
+def internal_error(error):
+    """Handle 500 errors"""
+    logger.exception("Internal server error")
+    return error_response(False, 'Internal server error',
+                        'An unexpected error occurred. Please try again later.', 500)
+
+
+@app.route('/weather/alerts', methods=['GET'])
+def get_weather_alerts():
+    """
+    Get active weather alerts for a city or all monitored cities.
+
+    Query parameters:
+        - city (optional): City name to get alerts for. Returns all active alerts if omitted.
+
+    Returns:
+        200: Active alerts data
+        400: Invalid city format
+        500: Server error
+
+    Example: /weather/alerts?city=London
+    """
+    try:
+        city = request.args.get('city', '').strip() or None
+
+        if city:
+            is_valid, validation_error = validate_city(city)
+            if not is_valid:
+                return error_response(False, 'Invalid city format', validation_error, 400)
+
+            # Fetch fresh weather data and evaluate alerts
+            units = request.args.get('units', 'metric').lower()
+            success, result = fetch_weather_data(city, units)
+
+            if not success:
+                error_title, status_code = map_error_to_status(result)
+                return error_response(False, error_title, result, status_code)
+
+            alerts_result = alert_manager.process_weather(city, result)
+            logger.info(f"Alerts evaluated for {city}: {len(alerts_result.get('alerts', []))} alert(s)")
+            return success_response({
+                'city': city,
+                'alerts_active': alerts_result['alerts_active'],
+                'alerts': alerts_result.get('alerts', []),
+                'alert_count': len(alerts_result.get('alerts', []))
+            }, 200)
+
+        # Return all active alerts across all tracked cities
+        summary = alert_manager.get_alert_summary()
+        active_alerts = alert_manager.get_active_alerts()
+        logger.info(f"Returning global alert summary: {summary['total_cities_with_alerts']} cities affected")
+        return success_response({
+            'summary': summary,
+            'active_alerts': active_alerts
+        }, 200)
+
+    except Exception as e:
+        logger.exception(f"Unexpected error in get_weather_alerts: {str(e)}")
+        return error_response(False, 'Internal server error',
+                            'An unexpected error occurred. Please try again later.', 500)
+
+
+@app.route('/system/health', methods=['GET'])
+def system_health():
+    """
+    Detailed system health and performance metrics.
+
+    Returns:
+        200: System health status, API performance stats, cache stats, and alert summary
+    """
+    try:
+        storage_stats = get_storage_stats()
+        perf_stats = performance_monitor.get_stats()
+        health_status = performance_monitor.get_health_status()
+        cache_stats = weather_cache.get_stats()
+        alert_summary = alert_manager.get_alert_summary()
+        api_key_ok = bool(OPENWEATHER_API_KEY and OPENWEATHER_API_KEY != 'your_api_key_here')
+
+        return success_response({
+            'status': health_status,
+            'api_key_configured': api_key_ok,
+            'storage': {
+                'type': storage_stats.get('storage_type'),
+                'total_records': storage_stats.get('record_count'),
+                'file_size_mb': storage_stats.get('file_size_mb')
+            },
+            'performance': {
+                'avg_response_time_s': round(perf_stats.get('avg_response_time', 0), 3),
+                'min_response_time_s': round(perf_stats.get('min_response_time', 0), 3),
+                'max_response_time_s': round(perf_stats.get('max_response_time', 0), 3),
+                'total_requests': perf_stats.get('total_requests', 0),
+                'endpoint_stats': perf_stats.get('endpoint_stats', {})
+            },
+            'cache': cache_stats,
+            'alerts': alert_summary,
+            'version': '2.0'
+        }, 200)
+
+    except Exception as e:
+        logger.exception(f"Error in system_health: {str(e)}")
+        return error_response(False, 'Internal server error',
+                            'Failed to retrieve system health metrics', 500)
+
+
+@app.route('/system/cache/clear', methods=['POST'])
+def clear_cache():
+    """
+    Clear the weather data cache.
+    Returns:
+        200: Cache cleared successfully
+    """
+    try:
+        weather_cache.clear()
+        batch_cache.clear()
+        logger.info("Weather data cache cleared via API")
+        return success_response({'message': 'Cache cleared successfully'}, 200)
+    except Exception as e:
+        logger.exception(f"Error clearing cache: {str(e)}")
+        return error_response(False, 'Internal server error', 'Failed to clear cache', 500)
+
+
+if __name__ == '__main__':
+    logger.info("Initializing storage...")
+    initialize_storage()
+    logger.info(f"Starting Real-Time Weather Data Pipeline Backend on {FLASK_HOST}:{FLASK_PORT}")
+    app.run(
+        host=FLASK_HOST,
+        port=FLASK_PORT,
+        debug=FLASK_DEBUG
+    )
 
 
 @app.errorhandler(405)

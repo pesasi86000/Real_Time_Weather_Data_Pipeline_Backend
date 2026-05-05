@@ -65,11 +65,17 @@ DEFAULT_UNITS = 'metric'
 # ============================================================================
 
 # Temperature thresholds (in the respective units)
-ALERT_TEMP_HIGH_CELSIUS = 35  # High temperature alert in Celsius
-ALERT_TEMP_HIGH_FAHRENHEIT = 95  # High temperature alert in Fahrenheit
+ALERT_TEMP_HIGH_CELSIUS = 35       # High temperature alert in Celsius
+ALERT_TEMP_HIGH_FAHRENHEIT = 95    # High temperature alert in Fahrenheit
+ALERT_TEMP_LOW_CELSIUS = 0         # Freezing temperature alert in Celsius
+ALERT_TEMP_LOW_FAHRENHEIT = 32     # Freezing temperature alert in Fahrenheit
 
 # Humidity threshold (percentage)
 ALERT_HUMIDITY_HIGH = 80  # High humidity alert at 80% or above
+
+# Wind speed thresholds
+ALERT_WIND_HIGH_METRIC = 20        # High wind alert in m/s (metric)
+ALERT_WIND_HIGH_IMPERIAL = 45      # High wind alert in mph (imperial)
 
 # Bad weather conditions (any of these will trigger an alert)
 BAD_WEATHER_CONDITIONS = [
@@ -80,7 +86,12 @@ BAD_WEATHER_CONDITIONS = [
     'Severe',
     'Rainy',
     'Rain',
-    'Drizzle'
+    'Drizzle',
+    'Snow',
+    'Blizzard',
+    'Hail',
+    'Sleet',
+    'Freezing'
 ]
 
 # ============================================================================

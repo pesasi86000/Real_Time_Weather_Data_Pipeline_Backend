@@ -7,7 +7,11 @@ from helpers import setup_logger
 from config import (
     ALERT_TEMP_HIGH_CELSIUS,
     ALERT_TEMP_HIGH_FAHRENHEIT,
+    ALERT_TEMP_LOW_CELSIUS,
+    ALERT_TEMP_LOW_FAHRENHEIT,
     ALERT_HUMIDITY_HIGH,
+    ALERT_WIND_HIGH_METRIC,
+    ALERT_WIND_HIGH_IMPERIAL,
     BAD_WEATHER_CONDITIONS
 )
 
@@ -86,6 +90,57 @@ def check_bad_weather_alert(condition, description):
     return None
 
 
+def check_low_temperature_alert(temperature, units):
+    """
+    Check if temperature is at or below freezing threshold
+
+    Args:
+        temperature (float): Current temperature
+        units (str): 'metric' or 'imperial'
+
+    Returns:
+        dict: Alert info, or None if no alert
+    """
+    threshold = ALERT_TEMP_LOW_CELSIUS if units == 'metric' else ALERT_TEMP_LOW_FAHRENHEIT
+    unit_symbol = '°C' if units == 'metric' else '°F'
+
+    if temperature <= threshold:
+        return {
+            'type': 'LOW_TEMPERATURE',
+            'active': True,
+            'message': f'Freezing temperature alert: {temperature}{unit_symbol} (at or below {threshold}{unit_symbol})',
+            'severity': 'warning'
+        }
+    return None
+
+
+def check_wind_alert(wind_speed, units):
+    """
+    Check if wind speed exceeds the alert threshold
+
+    Args:
+        wind_speed (float): Current wind speed
+        units (str): 'metric' (m/s) or 'imperial' (mph)
+
+    Returns:
+        dict: Alert info, or None if no alert
+    """
+    if wind_speed is None:
+        return None
+
+    threshold = ALERT_WIND_HIGH_METRIC if units == 'metric' else ALERT_WIND_HIGH_IMPERIAL
+    unit_label = 'm/s' if units == 'metric' else 'mph'
+
+    if wind_speed >= threshold:
+        return {
+            'type': 'HIGH_WIND',
+            'active': True,
+            'message': f'High wind alert: {wind_speed} {unit_label} (threshold: {threshold} {unit_label})',
+            'severity': 'warning'
+        }
+    return None
+
+
 def generate_alerts(weather_data):
     """
     Generate all applicable weather alerts for the given weather data
@@ -118,12 +173,24 @@ def generate_alerts(weather_data):
     if temp_alert:
         alerts.append(temp_alert)
         logger.warning(f"{weather_data['city']}: {temp_alert['message']}")
+
+    # Check low temperature / freezing alert
+    low_temp_alert = check_low_temperature_alert(weather_data['temperature'], weather_data['units'])
+    if low_temp_alert:
+        alerts.append(low_temp_alert)
+        logger.warning(f"{weather_data['city']}: {low_temp_alert['message']}")
     
     # Check humidity alert
     humidity_alert = check_humidity_alert(weather_data['humidity'])
     if humidity_alert:
         alerts.append(humidity_alert)
         logger.warning(f"{weather_data['city']}: {humidity_alert['message']}")
+
+    # Check wind speed alert
+    wind_alert = check_wind_alert(weather_data.get('wind_speed'), weather_data['units'])
+    if wind_alert:
+        alerts.append(wind_alert)
+        logger.warning(f"{weather_data['city']}: {wind_alert['message']}")
     
     # Check bad weather alert
     weather_alert = check_bad_weather_alert(weather_data['condition'], weather_data['description'])
