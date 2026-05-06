@@ -8,6 +8,7 @@ import requests
 from datetime import datetime
 from helpers import setup_logger
 from alerts_service import generate_alerts
+from resilience import rate_limiter, api_circuit_breaker, retry_policy
 from config import (
     OPENWEATHER_API_KEY,
     OPENWEATHER_BASE_URL,
@@ -118,7 +119,7 @@ def build_request_params(city, units):
 
 def make_weather_request(params):
     """
-    Make HTTP request to OpenWeather API
+    Make HTTP request to OpenWeather API with rate limiting and resilience
     
     Args:
         params (dict): Request parameters
@@ -126,25 +127,80 @@ def make_weather_request(params):
     Returns:
         tuple: (success: bool, response: Response or error_message: str)
     """
-    try:
-        response = requests.get(
-            OPENWEATHER_BASE_URL,
-            params=params,
-            timeout=REQUEST_TIMEOUT
-        )
-        return True, response
+    # Check rate limit
+    if not rate_limiter.is_allowed():
+        retry_after = rate_limiter.get_retry_after()
+        error_msg = f"Rate limited. Please retry after {retry_after:.1f}s"
+        logger.warning(error_msg)
+        return False, error_msg
+    
+    # Check circuit breaker
+    if not api_circuit_breaker.can_attempt():
+        state = api_circuit_breaker.get_state()
+        error_msg = f"API temporarily unavailable (Circuit breaker: {state['state']})"
+        logger.warning(error_msg)
+        return False, error_msg
+    
+    # Retry logic with exponential backoff
+    city = params.get('q', 'Unknown')
+    for attempt in range(retry_policy.max_attempts):
+        try:
+            response = requests.get(
+                OPENWEATHER_BASE_URL,
+                params=params,
+                timeout=REQUEST_TIMEOUT
+            )
+            
+            # Record success in circuit breaker
+            api_circuit_breaker.record_success()
+            return True, response
+            
+        except requests.exceptions.Timeout:
+            error_msg = "Request timeout. API server not responding."
+            logger.error(f"Attempt {attempt + 1}: {error_msg} for {city}")
+            
+            if not retry_policy.should_retry(attempt, 'timeout'):
+                api_circuit_breaker.record_failure()
+                return False, error_msg
+            
+            if attempt < retry_policy.max_attempts - 1:
+                delay = retry_policy.get_retry_delay(attempt)
+                logger.info(f"Retrying in {delay}s...")
+                import time
+                time.sleep(delay)
         
-    except requests.exceptions.Timeout:
-        logger.error(f"Request timeout for {params.get('q')}")
-        return False, "Request timeout. API server not responding."
+        except requests.exceptions.ConnectionError:
+            error_msg = "Connection error. Unable to reach weather API."
+            logger.error(f"Attempt {attempt + 1}: {error_msg} for {city}")
+            
+            if not retry_policy.should_retry(attempt, 'connection'):
+                api_circuit_breaker.record_failure()
+                return False, error_msg
+            
+            if attempt < retry_policy.max_attempts - 1:
+                delay = retry_policy.get_retry_delay(attempt)
+                logger.info(f"Retrying in {delay}s...")
+                import time
+                time.sleep(delay)
         
-    except requests.exceptions.ConnectionError:
-        logger.error("Connection error to OpenWeather API")
-        return False, "Connection error. Unable to reach weather API."
-        
-    except requests.exceptions.RequestException as e:
-        logger.error(f"Request error: {str(e)}")
-        return False, f"Request failed: {str(e)}"
+        except requests.exceptions.RequestException as e:
+            error_msg = f"Request failed: {str(e)}"
+            logger.error(f"Attempt {attempt + 1}: {error_msg} for {city}")
+            
+            if not retry_policy.should_retry(attempt, 'request'):
+                api_circuit_breaker.record_failure()
+                return False, error_msg
+            
+            if attempt < retry_policy.max_attempts - 1:
+                delay = retry_policy.get_retry_delay(attempt)
+                logger.info(f"Retrying in {delay}s...")
+                import time
+                time.sleep(delay)
+    
+    # All retries exhausted
+    api_circuit_breaker.record_failure()
+    logger.error(f"Max retry attempts reached for {city}")
+    return False, "Failed to retrieve weather data after multiple attempts"
 
 
 def handle_api_response(response):
@@ -185,6 +241,7 @@ def handle_api_response(response):
 def extract_weather_info(api_data, units):
     """
     Extract and format weather information from API response
+    Handles missing fields gracefully with validation and defaults.
     
     Args:
         api_data (dict): Raw data from OpenWeather API
@@ -192,23 +249,65 @@ def extract_weather_info(api_data, units):
         
     Returns:
         dict: Formatted weather information
+        
+    Raises:
+        ValueError: If critical fields are missing
     """
-    weather_info = {
-        'city': api_data.get('name', 'Unknown'),
-        'country': api_data.get('sys', {}).get('country', 'Unknown'),
-        'temperature': api_data.get('main', {}).get('temp'),
-        'feels_like': api_data.get('main', {}).get('feels_like'),
-        'humidity': api_data.get('main', {}).get('humidity'),
-        'pressure': api_data.get('main', {}).get('pressure'),
-        'condition': api_data.get('weather', [{}])[0].get('main', 'Unknown'),
-        'description': api_data.get('weather', [{}])[0].get('description', 'N/A'),
-        'wind_speed': api_data.get('wind', {}).get('speed', 0),
-        'cloudiness': api_data.get('clouds', {}).get('all'),
-        'units': units,
-        'fetched_at': datetime.utcnow().isoformat() + 'Z'
-    }
+    # Validate critical fields
+    required_fields = ['name', 'main', 'weather']
+    for field in required_fields:
+        if field not in api_data or not api_data[field]:
+            logger.error(f"Missing required API field: {field}")
+            raise ValueError(f"Invalid API response: missing {field}")
     
-    return weather_info
+    try:
+        main_data = api_data.get('main', {})
+        weather_data = api_data.get('weather', [{}])[0]
+        wind_data = api_data.get('wind', {})
+        sys_data = api_data.get('sys', {})
+        clouds_data = api_data.get('clouds', {})
+        
+        # Validate critical numeric values
+        temperature = main_data.get('temp')
+        humidity = main_data.get('humidity')
+        
+        if temperature is None:
+            logger.error("Missing temperature in API response")
+            raise ValueError("Invalid API response: temperature is required")
+        
+        if humidity is None:
+            logger.error("Missing humidity in API response")
+            raise ValueError("Invalid API response: humidity is required")
+        
+        # Safely convert to ensure proper types
+        try:
+            temperature = float(temperature)
+            humidity = int(humidity)
+        except (ValueError, TypeError) as e:
+            logger.error(f"Invalid temperature/humidity values: {e}")
+            raise ValueError(f"Invalid temperature or humidity format: {e}")
+        
+        # Extract data with safe defaults
+        weather_info = {
+            'city': api_data.get('name', 'Unknown').strip() or 'Unknown',
+            'country': sys_data.get('country', 'Unknown'),
+            'temperature': temperature,
+            'feels_like': main_data.get('feels_like', temperature),  # Default to actual temp
+            'humidity': humidity,
+            'pressure': main_data.get('pressure', 0),
+            'condition': weather_data.get('main', 'Unknown'),
+            'description': weather_data.get('description', 'N/A'),
+            'wind_speed': wind_data.get('speed', 0),
+            'cloudiness': clouds_data.get('all', 0),
+            'units': units,
+            'fetched_at': datetime.utcnow().isoformat() + 'Z'
+        }
+        
+        return weather_info
+        
+    except (ValueError, TypeError) as e:
+        logger.error(f"Error extracting weather info: {e}")
+        raise ValueError(f"Failed to process API response: {e}")
 
 
 # ============================================================================

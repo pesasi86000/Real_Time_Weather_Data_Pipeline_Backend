@@ -8,6 +8,7 @@ from data_storage import get_weather_data, get_storage_stats, initialize_storage
 from data_cache import weather_cache, batch_cache
 from performance_monitor import performance_monitor
 from alert_manager import alert_manager
+from resilience import rate_limiter, api_circuit_breaker
 
 # Initialize Flask app
 app = Flask(__name__, template_folder='templates')
@@ -480,7 +481,7 @@ def system_health():
     Detailed system health and performance metrics.
 
     Returns:
-        200: System health status, API performance stats, cache stats, and alert summary
+        200: System health status, API performance stats, cache stats, resilience metrics, and alert summary
     """
     try:
         storage_stats = get_storage_stats()
@@ -489,6 +490,14 @@ def system_health():
         cache_stats = weather_cache.get_stats()
         alert_summary = alert_manager.get_alert_summary()
         api_key_ok = bool(OPENWEATHER_API_KEY and OPENWEATHER_API_KEY != 'your_api_key_here')
+        
+        # Get resilience metrics
+        circuit_breaker_state = api_circuit_breaker.get_state()
+        rate_limiter_stats = {
+            'max_requests_per_window': rate_limiter.max_requests,
+            'time_window_seconds': rate_limiter.time_window,
+            'requests_made': len(rate_limiter.requests)
+        }
 
         return success_response({
             'status': health_status,
@@ -506,6 +515,14 @@ def system_health():
                 'endpoint_stats': perf_stats.get('endpoint_stats', {})
             },
             'cache': cache_stats,
+            'resilience': {
+                'circuit_breaker': {
+                    'state': circuit_breaker_state['state'],
+                    'failure_count': circuit_breaker_state['failure_count'],
+                    'success_count': circuit_breaker_state['success_count']
+                },
+                'rate_limiter': rate_limiter_stats
+            },
             'alerts': alert_summary,
             'version': '2.0'
         }, 200)

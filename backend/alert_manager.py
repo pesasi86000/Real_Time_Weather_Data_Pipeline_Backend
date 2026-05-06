@@ -4,6 +4,8 @@ Enhanced alert system with persistence and real-time monitoring
 """
 
 from datetime import datetime
+from threading import Lock
+from collections import deque
 from helpers import setup_logger
 from alerts_service import generate_alerts
 
@@ -89,9 +91,6 @@ class AlertManager:
         with self.lock:
             return list(self.alert_history)[-limit:]
 
-
-from threading import Lock
-from collections import deque
 
 # Global alert manager instance
 alert_manager = AlertManager()

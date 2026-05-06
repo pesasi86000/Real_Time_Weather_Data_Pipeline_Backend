@@ -144,6 +144,7 @@ def check_wind_alert(wind_speed, units):
 def generate_alerts(weather_data):
     """
     Generate all applicable weather alerts for the given weather data
+    Safely handles missing fields and type mismatches.
     
     Args:
         weather_data (dict): Weather information containing temperature, humidity, 
@@ -165,40 +166,66 @@ def generate_alerts(weather_data):
                 ...
             ]
         }
+        
+    Raises:
+        ValueError: If critical fields are missing
     """
+    # Validate required fields
+    required_fields = ['temperature', 'humidity', 'units', 'condition', 'description']
+    for field in required_fields:
+        if field not in weather_data:
+            error_msg = f"Missing required weather field for alerts: {field}"
+            logger.error(error_msg)
+            raise ValueError(error_msg)
+    
     alerts = []
     
-    # Check temperature alert
-    temp_alert = check_temperature_alert(weather_data['temperature'], weather_data['units'])
-    if temp_alert:
-        alerts.append(temp_alert)
-        logger.warning(f"{weather_data['city']}: {temp_alert['message']}")
+    try:
+        # Check temperature alert
+        temp_alert = check_temperature_alert(weather_data['temperature'], weather_data['units'])
+        if temp_alert:
+            alerts.append(temp_alert)
+            logger.warning(f"{weather_data.get('city', 'Unknown')}: {temp_alert['message']}")
 
-    # Check low temperature / freezing alert
-    low_temp_alert = check_low_temperature_alert(weather_data['temperature'], weather_data['units'])
-    if low_temp_alert:
-        alerts.append(low_temp_alert)
-        logger.warning(f"{weather_data['city']}: {low_temp_alert['message']}")
-    
-    # Check humidity alert
-    humidity_alert = check_humidity_alert(weather_data['humidity'])
-    if humidity_alert:
-        alerts.append(humidity_alert)
-        logger.warning(f"{weather_data['city']}: {humidity_alert['message']}")
+        # Check low temperature / freezing alert
+        low_temp_alert = check_low_temperature_alert(weather_data['temperature'], weather_data['units'])
+        if low_temp_alert:
+            alerts.append(low_temp_alert)
+            logger.warning(f"{weather_data.get('city', 'Unknown')}: {low_temp_alert['message']}")
+        
+        # Check humidity alert
+        humidity_alert = check_humidity_alert(weather_data['humidity'])
+        if humidity_alert:
+            alerts.append(humidity_alert)
+            logger.warning(f"{weather_data.get('city', 'Unknown')}: {humidity_alert['message']}")
 
-    # Check wind speed alert
-    wind_alert = check_wind_alert(weather_data.get('wind_speed'), weather_data['units'])
-    if wind_alert:
-        alerts.append(wind_alert)
-        logger.warning(f"{weather_data['city']}: {wind_alert['message']}")
-    
-    # Check bad weather alert
-    weather_alert = check_bad_weather_alert(weather_data['condition'], weather_data['description'])
-    if weather_alert:
-        alerts.append(weather_alert)
-        logger.warning(f"{weather_data['city']}: {weather_alert['message']}")
-    
-    return {
-        'alerts_active': len(alerts) > 0,
-        'alerts': alerts
-    }
+        # Check wind speed alert (wind_speed is optional)
+        wind_speed = weather_data.get('wind_speed')
+        if wind_speed is not None:
+            wind_alert = check_wind_alert(wind_speed, weather_data['units'])
+            if wind_alert:
+                alerts.append(wind_alert)
+                logger.warning(f"{weather_data.get('city', 'Unknown')}: {wind_alert['message']}")
+        
+        # Check bad weather alert
+        weather_alert = check_bad_weather_alert(
+            weather_data.get('condition', 'Unknown'),
+            weather_data.get('description', 'N/A')
+        )
+        if weather_alert:
+            alerts.append(weather_alert)
+            logger.warning(f"{weather_data.get('city', 'Unknown')}: {weather_alert['message']}")
+        
+        return {
+            'alerts_active': len(alerts) > 0,
+            'alerts': alerts
+        }
+        
+    except (KeyError, TypeError, ValueError) as e:
+        logger.error(f"Error generating alerts: {e}")
+        # Return empty alerts instead of crashing
+        logger.warning(f"Returning empty alerts for {weather_data.get('city', 'Unknown')}")
+        return {
+            'alerts_active': False,
+            'alerts': []
+        }

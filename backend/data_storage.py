@@ -198,6 +198,7 @@ def save_to_csv(weather_data: Dict) -> Tuple[bool, str]:
     """
     Save a single weather record to CSV file (append mode).
     Creates file with headers if it doesn't exist.
+    Includes retry logic for file I/O failures.
     
     Args:
         weather_data (dict): Weather data to save
@@ -205,34 +206,58 @@ def save_to_csv(weather_data: Dict) -> Tuple[bool, str]:
     Returns:
         tuple: (success: bool, message: str)
     """
-    try:
-        # Validate and format the record
-        record = format_weather_record(weather_data)
+    max_retries = 3
+    retry_delay = 0.1
+    
+    for attempt in range(max_retries):
+        try:
+            # Validate storage directory exists
+            if not os.path.exists(STORAGE_DIR):
+                logger.warning(f"Storage directory does not exist: {STORAGE_DIR}. Creating...")
+                os.makedirs(STORAGE_DIR, exist_ok=True)
+            
+            # Validate and format the record
+            record = format_weather_record(weather_data)
+            csv_path = os.path.join(STORAGE_DIR, CSV_FILE)
+            
+            # Check if file exists and has content
+            file_exists = os.path.exists(csv_path) and os.path.getsize(csv_path) > 0
+            
+            # If file doesn't exist, create with headers
+            if not file_exists:
+                with open(csv_path, 'w', newline='', encoding='utf-8') as csvfile:
+                    writer = csv.DictWriter(csvfile, fieldnames=CSV_COLUMNS)
+                    writer.writeheader()
+                    writer.writerow(record)
+                logger.info(f"Created CSV file and saved weather data for {record['city']}")
+            else:
+                # Append to existing file
+                with open(csv_path, 'a', newline='', encoding='utf-8') as csvfile:
+                    writer = csv.DictWriter(csvfile, fieldnames=CSV_COLUMNS)
+                    writer.writerow(record)
+                logger.info(f"Appended weather data for {record['city']} to CSV")
+            
+            return True, f"Weather data saved to CSV for {record['city']}"
+            
+        except (IOError, OSError) as e:
+            if attempt < max_retries - 1:
+                import time
+                logger.warning(f"Attempt {attempt + 1}: I/O error saving to CSV: {str(e)}. Retrying in {retry_delay}s...")
+                time.sleep(retry_delay)
+                retry_delay *= 2  # Exponential backoff
+            else:
+                logger.error(f"Failed to save to CSV after {max_retries} attempts: {str(e)}")
+                return False, f"CSV save error (I/O failure after retries): {str(e)}"
         
-        csv_path = os.path.join(STORAGE_DIR, CSV_FILE)
+        except ValueError as e:
+            logger.error(f"Invalid weather data: {str(e)}")
+            return False, f"CSV save error (invalid data): {str(e)}"
         
-        # Check if file exists and has content
-        file_exists = os.path.exists(csv_path) and os.path.getsize(csv_path) > 0
-        
-        # If file doesn't exist, create with headers
-        if not file_exists:
-            with open(csv_path, 'w', newline='', encoding='utf-8') as csvfile:
-                writer = csv.DictWriter(csvfile, fieldnames=CSV_COLUMNS)
-                writer.writeheader()
-                writer.writerow(record)
-            logger.info(f"Created CSV file and saved weather data for {record['city']}")
-        else:
-            # Append to existing file
-            with open(csv_path, 'a', newline='', encoding='utf-8') as csvfile:
-                writer = csv.DictWriter(csvfile, fieldnames=CSV_COLUMNS)
-                writer.writerow(record)
-            logger.info(f"Appended weather data for {record['city']} to CSV")
-        
-        return True, f"Weather data saved to CSV for {record['city']}"
-        
-    except Exception as e:
-        logger.error(f"Error saving to CSV: {str(e)}")
-        return False, f"CSV save error: {str(e)}"
+        except Exception as e:
+            logger.error(f"Unexpected error saving to CSV: {str(e)}")
+            return False, f"CSV save error (unexpected): {str(e)}"
+    
+    return False, "Failed to save to CSV: Max retries exceeded"
 
 
 def save_batch_to_csv(weather_records: List[Dict]) -> Tuple[bool, str]:
@@ -295,6 +320,7 @@ def save_batch_to_csv(weather_records: List[Dict]) -> Tuple[bool, str]:
 def save_to_sqlite(weather_data: Dict) -> Tuple[bool, str]:
     """
     Save a single weather record to SQLite database.
+    Includes retry logic for database locks and atomic operations.
     
     Args:
         weather_data (dict): Weather data to save
@@ -302,33 +328,66 @@ def save_to_sqlite(weather_data: Dict) -> Tuple[bool, str]:
     Returns:
         tuple: (success: bool, message: str)
     """
-    try:
-        # Validate and format the record
-        record = format_weather_record(weather_data)
+    max_retries = 3
+    retry_delay = 0.1
+    
+    for attempt in range(max_retries):
+        try:
+            # Validate storage directory exists
+            if not os.path.exists(STORAGE_DIR):
+                logger.warning(f"Storage directory does not exist: {STORAGE_DIR}. Creating...")
+                os.makedirs(STORAGE_DIR, exist_ok=True)
+            
+            # Validate and format the record
+            record = format_weather_record(weather_data)
+            
+            db_path = os.path.join(STORAGE_DIR, SQLITE_DB)
+            
+            # Open with timeout for concurrent access
+            conn = sqlite3.connect(db_path, timeout=10.0)
+            conn.execute('PRAGMA journal_mode=WAL')  # Write-Ahead Logging for better concurrency
+            
+            try:
+                cursor = conn.cursor()
+                cursor.execute('''
+                    INSERT INTO weather_data
+                    (datetime, city, temperature, humidity, condition, units)
+                    VALUES (?, ?, ?, ?, ?, ?)
+                ''', (
+                    record['datetime'],
+                    record['city'],
+                    record['temperature'],
+                    record['humidity'],
+                    record['condition'],
+                    record['units']
+                ))
+                conn.commit()
+                
+                logger.info(f"Saved weather data for {record['city']} to SQLite")
+                return True, f"Weather data saved to SQLite for {record['city']}"
+            
+            finally:
+                conn.close()
         
-        db_path = os.path.join(STORAGE_DIR, SQLITE_DB)
-        with sqlite3.connect(db_path) as conn:
-            cursor = conn.cursor()
-            cursor.execute('''
-                INSERT INTO weather_data
-                (datetime, city, temperature, humidity, condition, units)
-                VALUES (?, ?, ?, ?, ?, ?)
-            ''', (
-                record['datetime'],
-                record['city'],
-                record['temperature'],
-                record['humidity'],
-                record['condition'],
-                record['units']
-            ))
-            conn.commit()
-
-        logger.info(f"Saved weather data for {record['city']} to SQLite")
-        return True, f"Weather data saved to SQLite for {record['city']}"
+        except sqlite3.OperationalError as e:
+            if 'database is locked' in str(e) and attempt < max_retries - 1:
+                import time
+                logger.warning(f"Attempt {attempt + 1}: Database locked. Retrying in {retry_delay}s...")
+                time.sleep(retry_delay)
+                retry_delay *= 2  # Exponential backoff
+            else:
+                logger.error(f"SQLite operational error: {str(e)}")
+                return False, f"SQLite operational error: {str(e)}"
         
-    except Exception as e:
-        logger.error(f"Error saving to SQLite: {str(e)}")
-        return False, f"SQLite save error: {str(e)}"
+        except ValueError as e:
+            logger.error(f"Invalid weather data: {str(e)}")
+            return False, f"SQLite save error (invalid data): {str(e)}"
+        
+        except Exception as e:
+            logger.error(f"Unexpected error saving to SQLite: {str(e)}")
+            return False, f"SQLite save error (unexpected): {str(e)}"
+    
+    return False, "Failed to save to SQLite: Database locked after retries"
 
 
 def save_batch_to_sqlite(weather_records: List[Dict]) -> Tuple[bool, str]:
