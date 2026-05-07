@@ -40,8 +40,8 @@ SQLITE_DB = 'weather_data.db'
 # FLASK CONFIGURATION
 # ============================================================================
 
-FLASK_ENV = os.getenv('FLASK_ENV', 'development')
-FLASK_DEBUG = os.getenv('FLASK_DEBUG', 'true').lower() == 'true'
+FLASK_ENV = os.getenv('FLASK_ENV', 'production')
+FLASK_DEBUG = os.getenv('FLASK_DEBUG', 'false').lower() == 'true'
 FLASK_HOST = '0.0.0.0'
 FLASK_PORT = 5000
 
@@ -67,6 +67,8 @@ DEFAULT_UNITS = 'metric'
 # Temperature thresholds (in the respective units)
 ALERT_TEMP_HIGH_CELSIUS = 35       # High temperature alert in Celsius
 ALERT_TEMP_HIGH_FAHRENHEIT = 95    # High temperature alert in Fahrenheit
+ALERT_TEMP_CRITICAL_CELSIUS = 42   # Critical temperature alert in Celsius
+ALERT_TEMP_CRITICAL_FAHRENHEIT = 108  # Critical temperature alert in Fahrenheit
 ALERT_TEMP_LOW_CELSIUS = 0         # Freezing temperature alert in Celsius
 ALERT_TEMP_LOW_FAHRENHEIT = 32     # Freezing temperature alert in Fahrenheit
 

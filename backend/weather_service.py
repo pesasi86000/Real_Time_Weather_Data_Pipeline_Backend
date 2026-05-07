@@ -4,6 +4,7 @@ Handles all weather API interactions with modular, reusable functions
 """
 
 import re
+import time
 import requests
 from datetime import datetime
 from helpers import setup_logger
@@ -166,7 +167,6 @@ def make_weather_request(params):
             if attempt < retry_policy.max_attempts - 1:
                 delay = retry_policy.get_retry_delay(attempt)
                 logger.info(f"Retrying in {delay}s...")
-                import time
                 time.sleep(delay)
         
         except requests.exceptions.ConnectionError:
@@ -180,7 +180,6 @@ def make_weather_request(params):
             if attempt < retry_policy.max_attempts - 1:
                 delay = retry_policy.get_retry_delay(attempt)
                 logger.info(f"Retrying in {delay}s...")
-                import time
                 time.sleep(delay)
         
         except requests.exceptions.RequestException as e:
@@ -194,7 +193,6 @@ def make_weather_request(params):
             if attempt < retry_policy.max_attempts - 1:
                 delay = retry_policy.get_retry_delay(attempt)
                 logger.info(f"Retrying in {delay}s...")
-                import time
                 time.sleep(delay)
     
     # All retries exhausted

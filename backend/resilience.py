@@ -76,6 +76,12 @@ class RateLimiter:
             self.requests.clear()
             logger.info("RateLimiter reset")
 
+    def get_request_count(self):
+        """Return the number of requests in the current time window (thread-safe)"""
+        with self.lock:
+            now = time.time()
+            return sum(1 for ts in self.requests if ts >= now - self.time_window)
+
 
 class CircuitBreaker:
     """

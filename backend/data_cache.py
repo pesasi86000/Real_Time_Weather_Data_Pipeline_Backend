@@ -13,14 +13,16 @@ logger = setup_logger(__name__)
 
 class DataCache:
     """
-    Thread-safe cache for weather data with TTL support
+    Thread-safe cache for weather data with TTL support and a maximum size cap.
+    When the cache is full, the oldest entry is evicted (LRU-lite: insertion-order eviction).
     """
     
-    def __init__(self, ttl_seconds=600):  # Default 10 minutes
+    def __init__(self, ttl_seconds=600, max_size=500):
         self.cache = {}
         self.ttl = ttl_seconds
+        self.max_size = max_size
         self.lock = Lock()
-        logger.info(f"DataCache initialized with TTL: {ttl_seconds}s")
+        logger.info(f"DataCache initialized with TTL: {ttl_seconds}s, max_size: {max_size}")
     
     def get(self, key):
         """Get value from cache if not expired"""
@@ -40,8 +42,13 @@ class DataCache:
             return value
     
     def set(self, key, value):
-        """Set value in cache with current timestamp"""
+        """Set value in cache with current timestamp; evict oldest entry if at capacity"""
         with self.lock:
+            # Evict oldest entry when at capacity (and key is not already present)
+            if key not in self.cache and len(self.cache) >= self.max_size:
+                oldest_key = next(iter(self.cache))
+                del self.cache[oldest_key]
+                logger.debug(f"Cache eviction (max_size={self.max_size}): removed key {oldest_key}")
             self.cache[key] = (value, time.time())
             logger.debug(f"Cache set for key: {key}")
     
@@ -67,7 +74,8 @@ class DataCache:
                 'total_items': len(self.cache),
                 'active_items': active_items,
                 'expired_items': len(self.cache) - active_items,
-                'ttl_seconds': self.ttl
+                'ttl_seconds': self.ttl,
+                'max_size': self.max_size
             }
 
 

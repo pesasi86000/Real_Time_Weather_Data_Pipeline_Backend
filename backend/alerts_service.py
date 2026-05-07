@@ -7,6 +7,8 @@ from helpers import setup_logger
 from config import (
     ALERT_TEMP_HIGH_CELSIUS,
     ALERT_TEMP_HIGH_FAHRENHEIT,
+    ALERT_TEMP_CRITICAL_CELSIUS,
+    ALERT_TEMP_CRITICAL_FAHRENHEIT,
     ALERT_TEMP_LOW_CELSIUS,
     ALERT_TEMP_LOW_FAHRENHEIT,
     ALERT_HUMIDITY_HIGH,
@@ -30,8 +32,17 @@ def check_temperature_alert(temperature, units):
         dict: Alert info with 'active' and 'message' keys, or None if no alert
     """
     threshold = ALERT_TEMP_HIGH_CELSIUS if units == 'metric' else ALERT_TEMP_HIGH_FAHRENHEIT
+    critical_threshold = ALERT_TEMP_CRITICAL_CELSIUS if units == 'metric' else ALERT_TEMP_CRITICAL_FAHRENHEIT
     unit_symbol = '°C' if units == 'metric' else '°F'
     
+    if temperature >= critical_threshold:
+        return {
+            'type': 'HIGH_TEMPERATURE',
+            'active': True,
+            'message': f'Extreme temperature alert: {temperature}{unit_symbol} (threshold: {critical_threshold}{unit_symbol})',
+            'severity': 'critical'
+        }
+
     if temperature >= threshold:
         return {
             'type': 'HIGH_TEMPERATURE',

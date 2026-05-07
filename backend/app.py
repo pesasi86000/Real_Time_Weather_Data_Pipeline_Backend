@@ -252,6 +252,14 @@ def get_weather_batch():
             return error_response(False, 'Invalid parameter',
                                 f"The 'units' parameter must be one of: {', '.join(VALID_UNITS)}", 400)
         
+        # Check batch cache before fetching
+        sorted_cities = sorted(c.strip().lower() for c in cities if c.strip())
+        batch_key = f"batch:{','.join(sorted_cities)}:{units}"
+        cached_batch = batch_cache.get(batch_key)
+        if cached_batch:
+            logger.info(f"Batch cache hit for {len(sorted_cities)} cities ({units})")
+            return jsonify(cached_batch), 200
+
         # Validate and fetch weather for all cities
         results = {
             'success': True,
@@ -272,11 +280,21 @@ def get_weather_batch():
                 logger.warning(f"Invalid city format: {city} - {validation_error}")
                 continue
             
+            # Serve from per-city cache when available
+            city_cache_key = f"weather:{city.strip().lower()}:{units}"
+            cached_city = weather_cache.get(city_cache_key)
+            if cached_city:
+                results['successful'].append(cached_city)
+                logger.info(f"✓ Cache hit for {city}")
+                continue
+
             # Fetch weather data
             success, result = fetch_weather_data(city, units)
             
             if success:
-                results['successful'].append(result)
+                formatted = format_weather_for_api(result)
+                weather_cache.set(city_cache_key, formatted)
+                results['successful'].append(formatted)
                 logger.info(f"✓ Fetched weather for {city}")
             else:
                 results['failed'].append({
@@ -290,8 +308,9 @@ def get_weather_batch():
         results['failed_count'] = len(results['failed'])
         results['invalid_format_count'] = len(results['invalid_format'])
         
-        # Return response
+        # Cache successful batch responses
         if results['successful']:
+            batch_cache.set(batch_key, results)
             logger.info(f"Successfully fetched weather for {results['successful_count']}/{len(cities)} cities")
             return jsonify(results), 200
         else:
@@ -496,7 +515,7 @@ def system_health():
         rate_limiter_stats = {
             'max_requests_per_window': rate_limiter.max_requests,
             'time_window_seconds': rate_limiter.time_window,
-            'requests_made': len(rate_limiter.requests)
+            'requests_made': rate_limiter.get_request_count()
         }
 
         return success_response({
@@ -559,14 +578,6 @@ if __name__ == '__main__':
         port=FLASK_PORT,
         debug=FLASK_DEBUG
     )
-
-
-@app.errorhandler(405)
-def method_not_allowed(error):
-    """Handle 405 errors (method not allowed)"""
-    return error_response(False, 'Method not allowed',
-                        'The HTTP method used is not allowed for this endpoint', 405)
-
 
 @app.errorhandler(500)
 def internal_error(error):

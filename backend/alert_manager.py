@@ -26,9 +26,13 @@ class AlertManager:
     def process_weather(self, city, weather_data):
         """Process weather data and generate/update alerts"""
         with self.lock:
-            # Generate alerts from weather data
-            alerts_result = generate_alerts(weather_data)
-            
+            # Generate alerts from weather data; return empty result on validation errors
+            try:
+                alerts_result = generate_alerts(weather_data)
+            except (ValueError, KeyError) as e:
+                logger.error(f"Could not generate alerts for {city}: {e}")
+                return {'alerts_active': False, 'alerts': []}
+
             # Update active alerts
             if alerts_result['alerts_active']:
                 self.active_alerts[city] = {
