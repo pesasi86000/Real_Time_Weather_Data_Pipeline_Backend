@@ -10,6 +10,7 @@ import os
 import tempfile
 from unittest.mock import patch, MagicMock
 import json
+from flask import Flask
 
 # Add backend to path
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -428,6 +429,16 @@ class TestResiencePatterns(unittest.TestCase):
 
 class TestResponseFormatting(unittest.TestCase):
     """Test response formatting helpers"""
+    
+    def setUp(self):
+        """Set up Flask app context for tests"""
+        self.app = Flask(__name__)
+        self.app_context = self.app.app_context()
+        self.app_context.push()
+    
+    def tearDown(self):
+        """Tear down Flask app context"""
+        self.app_context.pop()
     
     def test_error_response(self):
         """Test error response formatting"""

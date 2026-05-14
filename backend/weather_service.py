@@ -6,7 +6,7 @@ Handles all weather API interactions with modular, reusable functions
 import re
 import time
 import requests
-from datetime import datetime
+from datetime import datetime, timezone
 from helpers import setup_logger
 from alerts_service import generate_alerts
 from resilience import rate_limiter, api_circuit_breaker, retry_policy
@@ -298,7 +298,7 @@ def extract_weather_info(api_data, units):
             'wind_speed': wind_data.get('speed', 0),
             'cloudiness': clouds_data.get('all', 0),
             'units': units,
-            'fetched_at': datetime.utcnow().isoformat() + 'Z'
+            'fetched_at': datetime.now(timezone.utc).isoformat().replace('+00:00', 'Z')
         }
         
         return weather_info
